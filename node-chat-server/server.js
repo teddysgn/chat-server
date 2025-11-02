@@ -1,41 +1,70 @@
 import express from "express";
 import { WebSocketServer } from "ws";
-import cors from "cors";
+import mysql from "mysql2";
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+const port = process.env.PORT || 10000;
 
-// Danh sách kết nối WebSocket
-let clients = [];
-
-// API test
-app.get("/", (req, res) => {
-  res.send("Chat server đang chạy ✅");
+// --- Kết nối MySQL ---
+const db = mysql.createConnection({
+  host: "77.37.35.67",      // ví dụ: "localhost"
+  user: "u134300833_otakusic",      // ví dụ: "root"
+  password: "Otakusic@2025",
+  database: "u134300833_otakusic"   // ví dụ: "otakusic"
 });
 
-const server = app.listen(process.env.PORT || 3000, () => {
-  console.log("Server chạy cổng", process.env.PORT || 3000);
+db.connect(err => {
+  if (err) {
+    console.error("❌ Lỗi kết nối MySQL:", err);
+  } else {
+    console.log("✅ Kết nối MySQL thành công!");
+  }
 });
 
-// Khởi tạo WebSocket server
+// --- WebSocket ---
+const server = app.listen(port, () => {
+  console.log(`🚀 Server chạy cổng ${port}`);
+});
+
 const wss = new WebSocketServer({ server });
 
 wss.on("connection", (ws) => {
-  clients.push(ws);
-  console.log("🔌 Client mới kết nối:", clients.length);
+  console.log("👤 Người dùng kết nối mới");
 
-  ws.on("message", (message) => {
-    // Khi nhận tin nhắn, broadcast đến tất cả
-    clients.forEach((client) => {
-      if (client.readyState === ws.OPEN) {
-        client.send(message.toString());
-      }
-    });
+  ws.on("message", (data) => {
+    try {
+      const msg = JSON.parse(data);
+      const { user_id, fullname, avatar, message } = msg;
+
+      // Lưu vào DB
+      db.query(
+        "INSERT INTO messages (user_id, fullname, avatar, message) VALUES (?, ?, ?, ?)",
+        [user_id, fullname, avatar, message],
+        (err) => {
+          if (err) console.error("❌ Lỗi lưu tin nhắn:", err);
+        }
+      );
+
+      // Gửi lại cho tất cả client
+      wss.clients.forEach(client => {
+        if (client.readyState === 1) {
+          client.send(JSON.stringify({
+            user_id, fullname, avatar, message, created_at: new Date()
+          }));
+        }
+      });
+    } catch (e) {
+      console.error("❌ Lỗi xử lý message:", e);
+    }
   });
 
-  ws.on("close", () => {
-    clients = clients.filter((c) => c !== ws);
-    console.log("❌ Client ngắt kết nối. Còn lại:", clients.length);
+  ws.on("close", () => console.log("👋 Người dùng ngắt kết nối"));
+});
+
+// --- API lấy lịch sử tin nhắn ---
+app.get("/messages", (req, res) => {
+  db.query("SELECT * FROM messages ORDER BY created_at ASC LIMIT 100", (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
   });
 });
