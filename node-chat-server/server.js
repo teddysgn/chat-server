@@ -63,7 +63,7 @@ wss.on("connection", (ws) => {
 
 // --- API lấy lịch sử tin nhắn ---
 app.get("/messages", (req, res) => {
-  db.query("SELECT * FROM messages ORDER BY created_at ASC LIMIT 100", (err, rows) => {
+  db.query("SELECT * FROM otakusic_messages ORDER BY created_at ASC LIMIT 100", (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });
