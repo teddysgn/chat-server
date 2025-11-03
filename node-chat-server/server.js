@@ -37,6 +37,7 @@ app.post("/messages", async (req, res) => {
     const token = req.cookies.otakusic_amme || req.body.session;
     if (!token) return res.status(401).json({ error: "Chưa đăng nhập" });
 
+    // 🔍 Lấy thông tin user
     const [users] = await db.query(
       "SELECT id, fullname, avatar, frame FROM otakusic_user WHERE session_token = ?",
       [token]
@@ -44,11 +45,22 @@ app.post("/messages", async (req, res) => {
     if (users.length === 0) return res.status(403).json({ error: "Phiên không hợp lệ" });
 
     const user = users[0];
+
+    // 🔍 Lấy shape tương ứng với frame (nếu có)
+    let shape = null;
+    if (user.frame) {
+      const [frames] = await db.query(
+        "SELECT shape FROM otakusic_frames WHERE picture = ? LIMIT 1",
+        [user.frame]
+      );
+      if (frames.length > 0) shape = frames[0].shape;
+    }
+
     const { message } = req.body;
 
     await db.query(
-      "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, message, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
-      [user.id, user.fullname, user.avatar, user.frame, message]
+      "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+      [user.id, user.fullname, user.avatar, user.frame, shape, message]
     );
 
     res.json({ success: true });
@@ -86,6 +98,15 @@ wss.on("connection", async (ws, req) => {
       [sessionToken]
     );
     if (rows.length > 0) user = rows[0];
+
+    // 🔍 Lấy shape tương ứng với frame
+    if (user && user.frame) {
+      const [frames] = await db.query(
+        "SELECT shape FROM otakusic_frames WHERE picture = ? LIMIT 1",
+        [user.frame]
+      );
+      if (frames.length > 0) user.shape = frames[0].shape;
+    }
   }
 
   ws.on("message", async data => {
@@ -99,13 +120,14 @@ wss.on("connection", async (ws, req) => {
         id: 0,
         fullname: "Khách",
         avatar: "/public/images/default-avatar.png",
-        frame: ""
+        frame: "",
+        shape: ""
       };
 
       // Lưu DB
       await db.query(
-        "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, message, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
-        [sender.id, sender.fullname, sender.avatar, sender.frame, message]
+        "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+        [sender.id, sender.fullname, sender.avatar, sender.frame, sender.shape, message]
       );
 
       // Gửi tin nhắn cho tất cả client
@@ -114,6 +136,7 @@ wss.on("connection", async (ws, req) => {
         fullname: sender.fullname,
         avatar: sender.avatar,
         frame: sender.frame,
+        shape: sender.shape,
         message,
         created_at: new Date().toISOString()
       };
