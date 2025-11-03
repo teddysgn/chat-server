@@ -1,70 +1,71 @@
 import express from "express";
 import { WebSocketServer } from "ws";
-import mysql from "mysql2";
+import mysql from "mysql2/promise";
+import cors from "cors";
 
 const app = express();
-const port = process.env.PORT || 10000;
+app.use(express.json());
 
-// --- Kết nối MySQL ---
-const db = mysql.createConnection({
+// ⚡ Cho phép CORS cho web của bạn
+app.use(cors({
+  origin: ["https://otakusic.com"], // domain frontend của bạn
+  methods: ["GET", "POST"],
+  credentials: true
+}));
+
+// ⚙️ Kết nối MySQL
+const db = await mysql.createConnection({
   host: "77.37.35.67",      // ví dụ: "localhost"
   user: "u134300833_otakusic",      // ví dụ: "root"
   password: "Otakusic@2025",
   database: "u134300833_otakusic"   // ví dụ: "otakusic"
 });
 
-db.connect(err => {
-  if (err) {
-    console.error("❌ Lỗi kết nối MySQL:", err);
-  } else {
-    console.log("✅ Kết nối MySQL thành công!");
-  }
+// 📦 Lưu tin nhắn
+app.post("/messages", async (req, res) => {
+  const { user_id, fullname, avatar, message } = req.body;
+  await db.query(
+    "INSERT INTO otakusic_messages (user_id, fullname, avatar, message, created_at) VALUES (?, ?, ?, ?, NOW())",
+    [user_id, fullname, avatar, message]
+  );
+  res.json({ success: true });
 });
 
-// --- WebSocket ---
-const server = app.listen(port, () => {
-  console.log(`🚀 Server chạy cổng ${port}`);
+// 📤 Trả về tin nhắn
+app.get("/messages", async (req, res) => {
+  const [rows] = await db.query(
+    "SELECT * FROM otakusic_messages ORDER BY id DESC LIMIT 50"
+  );
+  res.json(rows.reverse());
+});
+
+// 🚀 HTTP server + WebSocket
+const server = app.listen(10000, () => {
+  console.log("✅ Server chạy cổng 10000");
 });
 
 const wss = new WebSocketServer({ server });
 
-wss.on("connection", (ws) => {
-  console.log("👤 Người dùng kết nối mới");
+wss.on("connection", ws => {
+  console.log("👥 Người dùng mới kết nối");
 
-  ws.on("message", (data) => {
+  ws.on("message", async data => {
     try {
       const msg = JSON.parse(data);
-      const { user_id, fullname, avatar, message } = msg;
-
-      // Lưu vào DB
-      db.query(
-        "INSERT INTO messages (user_id, fullname, avatar, message) VALUES (?, ?, ?, ?)",
-        [user_id, fullname, avatar, message],
-        (err) => {
-          if (err) console.error("❌ Lỗi lưu tin nhắn:", err);
-        }
+      await db.query(
+        "INSERT INTO otakusic_messages (user_id, fullname, avatar, message, created_at) VALUES (?, ?, ?, ?, NOW())",
+        [msg.user_id, msg.fullname, msg.avatar, msg.message]
       );
 
       // Gửi lại cho tất cả client
       wss.clients.forEach(client => {
-        if (client.readyState === 1) {
-          client.send(JSON.stringify({
-            user_id, fullname, avatar, message, created_at: new Date()
-          }));
+        if (client.readyState === ws.OPEN) {
+          client.send(JSON.stringify(msg));
         }
       });
-    } catch (e) {
-      console.error("❌ Lỗi xử lý message:", e);
+    } catch (err) {
+      console.error("❌ Lỗi khi xử lý tin nhắn:", err);
     }
   });
-
-  ws.on("close", () => console.log("👋 Người dùng ngắt kết nối"));
 });
 
-// --- API lấy lịch sử tin nhắn ---
-app.get("/messages", (req, res) => {
-  db.query("SELECT * FROM otakusic_messages ORDER BY created_at ASC LIMIT 100", (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
-});
