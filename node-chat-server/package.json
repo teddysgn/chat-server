@@ -6,10 +6,15 @@
   "scripts": {
     "start": "node server.js"
   },
+  "keywords": [],
+  "author": "Otakusic",
+  "license": "ISC",
   "dependencies": {
+    "cookie-parser": "^1.4.7",
     "express": "^4.19.2",
     "ws": "^8.17.1",
     "mysql2": "^3.10.0",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "socket.io": "^4.8.1"
   }
 }
