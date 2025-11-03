@@ -19,18 +19,37 @@ app.use((req, res, next) => {
   next();
 });
 
-// ⚙️ MySQL
-const db = await mysql.createConnection({
+// ⚙️ MySQL Pool — tự động quản lý kết nối & reconnect
+const dbConfig = {
   host: "77.37.35.67",
   user: "u134300833_otakusic",
   password: "Otakusic@2025",
   database: "u134300833_otakusic",
-});
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  charset: "utf8mb4",
+};
+
+let pool;
+
+async function initDB() {
+  try {
+    pool = mysql.createPool(dbConfig);
+    const conn = await pool.getConnection();
+    console.log("✅ Kết nối MySQL thành công");
+    conn.release();
+  } catch (err) {
+    console.error("❌ Kết nối MySQL thất bại, thử lại sau 5s...", err);
+    setTimeout(initDB, 5000);
+  }
+}
+await initDB();
 
 // 📨 API: Lấy tin nhắn
 app.get("/messages", async (req, res) => {
   try {
-    const [rows] = await db.query(
+    const [rows] = await pool.query(
       "SELECT * FROM otakusic_messages ORDER BY id DESC LIMIT 50"
     );
     res.json(rows.reverse());
@@ -47,17 +66,16 @@ app.post("/messages", async (req, res) => {
     if (!user?.id) return res.status(400).json({ error: "Thiếu user" });
     if (!message?.trim()) return res.status(400).json({ error: "Tin nhắn trống" });
 
-    // 🔍 Lấy shape của frame
     let shape = "";
     if (user.frame) {
-      const [frames] = await db.query(
+      const [frames] = await pool.query(
         "SELECT shape FROM otakusic_frames WHERE picture = ? LIMIT 1",
         [user.frame]
       );
       if (frames.length > 0) shape = frames[0].shape;
     }
 
-    await db.query(
+    await pool.query(
       "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
       [user.id, user.fullname, user.avatar, user.frame, shape, message]
     );
@@ -69,7 +87,7 @@ app.post("/messages", async (req, res) => {
   }
 });
 
-// 🚀 Tạo HTTP + WebSocket server
+// 🚀 HTTP + WebSocket server
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -82,23 +100,20 @@ wss.on("connection", (ws) => {
       const { message, user } = msg;
       if (!user?.id || !message?.trim()) return;
 
-      // 🔍 Lấy shape của frame
       let shape = "";
       if (user.frame) {
-        const [frames] = await db.query(
+        const [frames] = await pool.query(
           "SELECT shape FROM otakusic_frames WHERE picture = ? LIMIT 1",
           [user.frame]
         );
         if (frames.length > 0) shape = frames[0].shape;
       }
 
-      // 💾 Lưu vào DB
-      await db.query(
+      await pool.query(
         "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
         [user.id, user.fullname, user.avatar, user.frame, shape, message]
       );
 
-      // 🔁 Phát tin nhắn tới tất cả client
       const payload = {
         user_id: user.id,
         fullname: user.fullname,
@@ -109,6 +124,7 @@ wss.on("connection", (ws) => {
         created_at: new Date().toISOString(),
       };
 
+      // 🔁 Phát tới tất cả client
       wss.clients.forEach((client) => {
         if (client.readyState === ws.OPEN) {
           client.send(JSON.stringify(payload));
@@ -118,6 +134,8 @@ wss.on("connection", (ws) => {
       console.error("❌ Lỗi WebSocket:", err);
     }
   });
+
+  ws.on("close", () => console.log("❌ Client đã ngắt kết nối"));
 });
 
 server.listen(10000, () => {
