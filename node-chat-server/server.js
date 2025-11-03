@@ -3,21 +3,23 @@ import { WebSocketServer } from "ws";
 import mysql from "mysql2/promise";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import http from "http";
 
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
-// ⚡ Cho phép CORS
-app.use(
-  cors({
-    origin: ["https://otakusic.com"],
-    methods: ["GET", "POST"],
-    credentials: true,
-  })
-);
+// ⚙️ CORS: Cho phép domain otakusic.com
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "https://otakusic.com");
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+  next();
+});
 
-// ⚙️ Kết nối MySQL
+// ⚙️ MySQL
 const db = await mysql.createConnection({
   host: "77.37.35.67",
   user: "u134300833_otakusic",
@@ -25,22 +27,27 @@ const db = await mysql.createConnection({
   database: "u134300833_otakusic",
 });
 
-// 📤 API: Lấy danh sách tin nhắn
+// 📨 API: Lấy tin nhắn
 app.get("/messages", async (req, res) => {
-  const [rows] = await db.query(
-    "SELECT * FROM otakusic_messages ORDER BY id DESC LIMIT 50"
-  );
-  res.json(rows.reverse());
+  try {
+    const [rows] = await db.query(
+      "SELECT * FROM otakusic_messages ORDER BY id DESC LIMIT 50"
+    );
+    res.json(rows.reverse());
+  } catch (err) {
+    console.error("❌ Lỗi lấy tin nhắn:", err);
+    res.status(500).json({ error: "Lỗi server" });
+  }
 });
 
-// 📦 API: Lưu tin nhắn qua HTTP (phòng trường hợp cần)
+// 📨 API: Lưu tin nhắn
 app.post("/messages", async (req, res) => {
   try {
     const { message, user } = req.body;
-    if (!user?.id) return res.status(401).json({ error: "Thiếu thông tin người dùng" });
+    if (!user?.id) return res.status(400).json({ error: "Thiếu user" });
     if (!message?.trim()) return res.status(400).json({ error: "Tin nhắn trống" });
 
-    // 🔍 Lấy shape của frame (nếu có)
+    // 🔍 Lấy shape của frame
     let shape = "";
     if (user.frame) {
       const [frames] = await db.query(
@@ -50,7 +57,6 @@ app.post("/messages", async (req, res) => {
       if (frames.length > 0) shape = frames[0].shape;
     }
 
-    // 💾 Lưu DB
     await db.query(
       "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
       [user.id, user.fullname, user.avatar, user.frame, shape, message]
@@ -58,31 +64,23 @@ app.post("/messages", async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error("❌ Lỗi khi lưu tin nhắn:", err);
+    console.error("❌ Lỗi lưu tin nhắn:", err);
     res.status(500).json({ error: "Lỗi server" });
   }
 });
 
-// 🚀 HTTP + WebSocket
-const server = app.listen(10000, () => {
-  console.log("✅ Server chạy tại cổng 10000");
-});
-
+// 🚀 Tạo HTTP + WebSocket server
+const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// ⚡ WebSocket: Xử lý tin nhắn realtime
-wss.on("connection", async (ws) => {
-  console.log("👥 Người dùng mới kết nối");
+wss.on("connection", (ws) => {
+  console.log("👥 WebSocket kết nối mới");
 
-  ws.on("message", async (data) => {
+  ws.on("message", async (rawData) => {
     try {
-      const msgData = JSON.parse(data);
-      const { message, user } = msgData;
-      if (!message?.trim()) return;
-      if (!user?.id) {
-        console.warn("⚠️ Không có thông tin người dùng, bỏ qua tin nhắn");
-        return;
-      }
+      const msg = JSON.parse(rawData);
+      const { message, user } = msg;
+      if (!user?.id || !message?.trim()) return;
 
       // 🔍 Lấy shape của frame
       let shape = "";
@@ -94,13 +92,13 @@ wss.on("connection", async (ws) => {
         if (frames.length > 0) shape = frames[0].shape;
       }
 
-      // 💾 Lưu DB
+      // 💾 Lưu vào DB
       await db.query(
         "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
         [user.id, user.fullname, user.avatar, user.frame, shape, message]
       );
 
-      // 🔁 Gửi lại cho tất cả client
+      // 🔁 Phát tin nhắn tới tất cả client
       const payload = {
         user_id: user.id,
         fullname: user.fullname,
@@ -117,7 +115,11 @@ wss.on("connection", async (ws) => {
         }
       });
     } catch (err) {
-      console.error("❌ Lỗi khi xử lý tin nhắn:", err);
+      console.error("❌ Lỗi WebSocket:", err);
     }
   });
+});
+
+server.listen(10000, () => {
+  console.log("✅ Chat server đang chạy tại cổng 10000");
 });
