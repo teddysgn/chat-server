@@ -5,8 +5,6 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import http from "http";
 
-dotenv.config();
-
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
