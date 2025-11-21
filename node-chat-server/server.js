@@ -4,7 +4,6 @@ import mysql from "mysql2/promise";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import http from "http";
-import dotenv from "dotenv";
 
 dotenv.config();
 
