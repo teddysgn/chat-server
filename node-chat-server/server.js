@@ -22,7 +22,7 @@ app.use((req, res, next) => {
 // ⚙️ MySQL Pool — tự động quản lý kết nối & reconnect
 const dbConfig = {
   host: "72.61.119.15",
-  user: "otak_otakusic",
+  user: "teddy_sgn",
   password: "OtakusicManga@2025",
   database: "otak_manga",
   waitForConnections: true,
