@@ -1,10 +1,19 @@
 import express from "express";
 import { WebSocketServer } from "ws";
 import mysql from "mysql2/promise";
+import cors from "cors";
+import cookieParser from "cookie-parser";
 import http from "http";
 
 const app = express();
 app.use(express.json());
+app.use(cookieParser());
+
+// ⚙️ CORS cho domain otakusic.com
+app.use(cors({
+  origin: "https://otakusic.com",
+  credentials: true
+}));
 
 // ⚙️ Config MySQL
 const dbConfig = {
@@ -20,6 +29,8 @@ const dbConfig = {
 };
 
 let pool;
+
+// 🔄 Tự động reconnect
 async function initDB() {
   try {
     pool = mysql.createPool(dbConfig);
@@ -33,7 +44,7 @@ async function initDB() {
 }
 await initDB();
 
-// 📨 API lấy tin nhắn
+// 📨 API: Lấy tin nhắn
 app.get("/messages", async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -46,28 +57,7 @@ app.get("/messages", async (req, res) => {
   }
 });
 
-// 📨 API xóa tin nhắn
-app.post("/message/delete", async (req, res) => {
-  try {
-    const { message_id } = req.body;
-    if (!message_id) return res.status(400).json({ error: "Thiếu message_id" });
-
-    await pool.query("UPDATE otakusic_messages SET deleted = 1 WHERE id = ?", [message_id]);
-
-    // Thông báo tất cả client
-    const payload = { action: "deleted", message_id };
-    wss.clients.forEach(client => {
-      if (client.readyState === client.OPEN) client.send(JSON.stringify(payload));
-    });
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("❌ Lỗi xóa tin nhắn:", err);
-    res.status(500).json({ error: "Lỗi server" });
-  }
-});
-
-// 🚀 WebSocket
+// 🚀 HTTP + WebSocket server
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -77,36 +67,74 @@ wss.on("connection", (ws) => {
   ws.on("message", async (rawData) => {
     try {
       const msg = JSON.parse(rawData);
-      const { message, user } = msg;
-      if (!user?.id || !message?.trim()) return;
+      const { action, message, message_id, user } = msg;
 
-      let shape = "";
-      if (user.frame) {
-        const [frames] = await pool.query(
-          "SELECT shape FROM otakusic_frames WHERE picture = ? LIMIT 1",
-          [user.frame]
+      // ---------------- Gửi tin nhắn ----------------
+      if (action === "message") {
+        if (!user?.id || !message?.trim()) return;
+
+        let shape = "";
+        if (user.frame) {
+          const [frames] = await pool.query(
+            "SELECT shape FROM otakusic_frames WHERE picture = ? LIMIT 1",
+            [user.frame]
+          );
+          if (frames.length > 0) shape = frames[0].shape;
+        }
+
+        const [result] = await pool.query(
+          "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+          [user.id, user.fullname, user.avatar, user.frame, shape, message]
         );
-        if (frames.length > 0) shape = frames[0].shape;
+
+        const payload = {
+          action: "message",
+          id: result.insertId,
+          user_id: user.id,
+          fullname: user.fullname,
+          avatar: user.avatar,
+          frame: user.frame,
+          shape,
+          message,
+          created_at: new Date().toISOString(),
+        };
+
+        wss.clients.forEach((client) => {
+          if (client.readyState === ws.OPEN) client.send(JSON.stringify(payload));
+        });
       }
 
-      await pool.query(
-        "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-        [user.id, user.fullname, user.avatar, user.frame, shape, message]
-      );
+      // ---------------- Xóa tin nhắn ----------------
+      if (action === "delete") {
+        if (!user?.id || !message_id) return;
 
-      const payload = {
-        user_id: user.id,
-        fullname: user.fullname,
-        avatar: user.avatar,
-        frame: user.frame,
-        shape,
-        message,
-        created_at: new Date().toISOString(),
-      };
+        // Kiểm tra quyền
+        if (!["admin", "creator"].includes(user.role)) {
+          // cho phép user xóa tin nhắn của chính mình
+          const [rows] = await pool.query(
+            "SELECT user_id FROM otakusic_messages WHERE id = ? LIMIT 1",
+            [message_id]
+          );
+          if (!rows.length || rows[0].user_id !== user.id) return;
+        }
 
-      wss.clients.forEach((client) => {
-        if (client.readyState === client.OPEN) client.send(JSON.stringify(payload));
-      });
+        // Cập nhật deleted
+        await pool.query(
+          "UPDATE otakusic_messages SET deleted = 1 WHERE id = ?",
+          [message_id]
+        );
+
+        // Thông báo cho mọi client
+        const payload = {
+          action: "deleted",
+          message_id
+        };
+
+        wss.clients.forEach((client) => {
+          if (client.readyState === ws.OPEN) client.send(JSON.stringify(payload));
+        });
+      }
+
     } catch (err) {
       console.error("❌ Lỗi WebSocket:", err);
     }
