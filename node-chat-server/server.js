@@ -4,12 +4,15 @@ import mysql from "mysql2/promise";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import http from "http";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
-// ⚙️ CORS: Cho phép domain otakusic.com
+// ⚙️ CORS cho domain otakusic.com
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "https://otakusic.com");
   res.header("Access-Control-Allow-Credentials", "true");
@@ -19,20 +22,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// ⚙️ MySQL Pool — tự động quản lý kết nối & reconnect
+// ⚙️ Config MySQL lấy từ .env
 const dbConfig = {
-  host: "72.61.119.15",
-  user: "teddy_sgn",
-  password: "OtakusicManga@2025",
-  database: "otak_manga",
+  host: "72.61.119.15", user: "teddy_sgn", password: "OtakusicManga@2025", database: "otak_manga",
+  port: process.env.DB_PORT || 3306,
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
   queueLimit: 0,
   charset: "utf8mb4",
 };
 
 let pool;
 
+// 🔄 Tự động reconnect
 async function initDB() {
   try {
     pool = mysql.createPool(dbConfig);
@@ -124,7 +126,6 @@ wss.on("connection", (ws) => {
         created_at: new Date().toISOString(),
       };
 
-      // 🔁 Phát tới tất cả client
       wss.clients.forEach((client) => {
         if (client.readyState === ws.OPEN) {
           client.send(JSON.stringify(payload));
