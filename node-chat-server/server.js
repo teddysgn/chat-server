@@ -75,7 +75,7 @@ app.post("/messages", async (req, res) => {
     }
 
     await pool.query(
-      "INSERT INTO otakusic_messages (id, user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+      "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
       [user.id, user.fullname, user.avatar, user.frame, shape, message]
     );
 
