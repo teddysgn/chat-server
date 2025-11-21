@@ -1,37 +1,25 @@
 import express from "express";
 import { WebSocketServer } from "ws";
 import mysql from "mysql2/promise";
-import cors from "cors";
-import cookieParser from "cookie-parser";
 import http from "http";
 
 const app = express();
 app.use(express.json());
-app.use(cookieParser());
 
-// ⚙️ CORS cho domain otakusic.com
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "https://otakusic.com");
-  res.header("Access-Control-Allow-Credentials", "true");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.sendStatus(200);
-  next();
-});
-
-// ⚙️ Config MySQL lấy từ .env
+// ⚙️ Config MySQL
 const dbConfig = {
-  host: "72.61.119.15", user: "teddy_sgn", password: "OtakusicManga@2025", database: "otak_manga",
-  port: process.env.DB_PORT || 3306,
+  host: "72.61.119.15",
+  user: "teddy_sgn",
+  password: "OtakusicManga@2025",
+  database: "otak_manga",
+  port: 3306,
   waitForConnections: true,
-  connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
+  connectionLimit: 10,
   queueLimit: 0,
   charset: "utf8mb4",
 };
 
 let pool;
-
-// 🔄 Tự động reconnect
 async function initDB() {
   try {
     pool = mysql.createPool(dbConfig);
@@ -45,7 +33,7 @@ async function initDB() {
 }
 await initDB();
 
-// 📨 API: Lấy tin nhắn
+// 📨 API lấy tin nhắn
 app.get("/messages", async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -58,35 +46,28 @@ app.get("/messages", async (req, res) => {
   }
 });
 
-// 📨 API: Lưu tin nhắn
-app.post("/messages", async (req, res) => {
+// 📨 API xóa tin nhắn
+app.post("/message/delete", async (req, res) => {
   try {
-    const { message, user } = req.body;
-    if (!user?.id) return res.status(400).json({ error: "Thiếu user" });
-    if (!message?.trim()) return res.status(400).json({ error: "Tin nhắn trống" });
+    const { message_id } = req.body;
+    if (!message_id) return res.status(400).json({ error: "Thiếu message_id" });
 
-    let shape = "";
-    if (user.frame) {
-      const [frames] = await pool.query(
-        "SELECT shape FROM otakusic_frames WHERE picture = ? LIMIT 1",
-        [user.frame]
-      );
-      if (frames.length > 0) shape = frames[0].shape;
-    }
+    await pool.query("UPDATE otakusic_messages SET deleted = 1 WHERE id = ?", [message_id]);
 
-    await pool.query(
-      "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-      [user.id, user.fullname, user.avatar, user.frame, shape, message]
-    );
+    // Thông báo tất cả client
+    const payload = { action: "deleted", message_id };
+    wss.clients.forEach(client => {
+      if (client.readyState === client.OPEN) client.send(JSON.stringify(payload));
+    });
 
     res.json({ success: true });
   } catch (err) {
-    console.error("❌ Lỗi lưu tin nhắn:", err);
+    console.error("❌ Lỗi xóa tin nhắn:", err);
     res.status(500).json({ error: "Lỗi server" });
   }
 });
 
-// 🚀 HTTP + WebSocket server
+// 🚀 WebSocket
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -124,9 +105,7 @@ wss.on("connection", (ws) => {
       };
 
       wss.clients.forEach((client) => {
-        if (client.readyState === ws.OPEN) {
-          client.send(JSON.stringify(payload));
-        }
+        if (client.readyState === client.OPEN) client.send(JSON.stringify(payload));
       });
     } catch (err) {
       console.error("❌ Lỗi WebSocket:", err);
