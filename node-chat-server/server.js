@@ -95,9 +95,11 @@ wss.on("connection", (ws) => {
           avatar: user.avatar,
           frame: user.frame,
           shape,
+          role: user.role,
           message,
           created_at: new Date().toISOString(),
         };
+
 
         wss.clients.forEach((client) => {
           if (client.readyState === ws.OPEN) client.send(JSON.stringify(payload));
