@@ -83,8 +83,8 @@ wss.on("connection", (ws) => {
         }
 
         const [result] = await pool.query(
-          "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, message, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-          [user.id, user.fullname, user.avatar, user.frame, shape, message]
+          "INSERT INTO otakusic_messages (user_id, fullname, avatar, frame, shape, role, message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+          [user.id, user.fullname, user.avatar, user.frame, shape, user.role, message]
         );
 
         const payload = {
